@@ -31,7 +31,7 @@ import zlib from "https://deno.land/std@0.148.0/node/zlib.ts";
 
 type Chunk = Buffer | string;
 
-class Response {
+export class Response {
   lines: string[] = [];
 
   constructor(public status: number, public message: string) {}
@@ -163,37 +163,42 @@ class CompressedStream extends Transform {
   }
 }
 
-type ActiveGroup = {
+export interface ActiveGroup {
   name: string;
   high: number;
   low: number;
   count?: number;
   posting?: boolean;
-};
+}
 
-interface ActiveGroupDict {
-  [key: string]: {
+export interface ActiveGroupDict {
+  [groupName: string]: {
     high: number;
     low: number;
     posting: boolean;
   };
 }
 
-interface FormatDict {
-  [key: string]: boolean;
+export interface OverviewFieldIsFullDict {
+  [fieldName: string]: boolean;
 }
 
-interface FormattedMessage {
-  [key: string]: string;
+export interface MessageOverviewRaw {
+  [fieldName: string]: string;
 }
 
-export type NNTPOptions = {
+export interface MessageLines {
+  headers: string[];
+  body: string[];
+}
+
+export interface NNTPOptions {
   host?: string;
   port?: number;
   secure?: boolean;
   username?: string;
   password?: string;
-};
+}
 
 const defaults: NNTPOptions = {
   host: "localhost",
@@ -280,7 +285,7 @@ export default class NNTP {
   }
 
   /** messageId can also be message number in current group */
-  async article(messageId: string) {
+  async article(messageId: string): Promise<MessageLines> {
     if (!this.#socket) {
       throw new Error(`not connected`);
     }
@@ -389,7 +394,7 @@ export default class NNTP {
   async overviewFormat() {
     const response = await this.#getResponse(true, false, "LIST OVERVIEW.FMT");
 
-    const format: FormatDict = {};
+    const format: OverviewFieldIsFullDict = {};
     response.lines.forEach((line: string) => {
       if (line.slice(-5).toLowerCase() === ":full") {
         format[line.slice(0, -5).toLowerCase()] = true;
@@ -402,7 +407,7 @@ export default class NNTP {
   }
 
   /** Older overview extension; RFC 2980 (Oct 2000) */
-  async xover(range: string, format: FormatDict) {
+  async xover(range: string, format: OverviewFieldIsFullDict) {
     format = Object.assign({ number: false }, format);
 
     const response = await this.#getResponse(true, false, `XOVER ${range}`);
@@ -410,7 +415,7 @@ export default class NNTP {
   }
 
   /** Non-standard compressed overview extension; q.v. RFC 8054 (Jan 2017) */
-  async xzver(range: string, format: FormatDict) {
+  async xzver(range: string, format: OverviewFieldIsFullDict) {
     format = Object.assign({ number: false }, format);
 
     const response = await this.#getResponse(true, true, `XZVER ${range}`);
@@ -467,10 +472,10 @@ export default class NNTP {
       });
   }
 
-  #parseOverview(overview: string[], format: FormatDict) {
+  #parseOverview(overview: string[], format: OverviewFieldIsFullDict) {
     return overview.map((line) => {
       const messageParts = line.toString().split("\t");
-      const message: FormattedMessage = {};
+      const message: MessageOverviewRaw = {};
 
       for (const [field, full] of Object.entries(format)) {
         const messagePart = messageParts.shift() || "";
