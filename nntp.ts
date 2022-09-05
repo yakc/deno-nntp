@@ -71,14 +71,16 @@ class ResponseStream extends Transform {
 
   _transform(chunk: Chunk, _encoding: string, done: () => void) {
     if (undefined === this.#response) {
-      this.#response = Response.createFromString(chunk.toString());
+      this.#response = Response.createFromString(
+        chunk.toString(defaultEncoding),
+      );
 
       if (false === this.multiline) {
         this.push(this.#response);
         this.end();
       }
     } else {
-      this.#response.lines.push(chunk.toString());
+      this.#response.lines.push(chunk.toString(defaultEncoding));
     }
 
     done();
@@ -88,6 +90,44 @@ class ResponseStream extends Transform {
     this.push(this.#response);
     done();
   }
+}
+
+const defaultEncoding = "latin1"; // aka 'binary'
+
+function charset2encoding(charset: string): string {
+  switch (charset.toLowerCase()) {
+    case "utf-8":
+    case "utf8":
+      return "utf8";
+    case "utf-16le":
+    case "utf16le":
+      return "utf16le";
+    case "iso-8859-1":
+    case "latin1":
+      return "latin1";
+  }
+  return defaultEncoding;
+}
+
+const windows1252x80 = [
+  "€ ‚ƒ„…†‡ˆ‰Š‹Œ Ž ",
+  " ‘’“”•–—˜™š›œ žŸ",
+].join("");
+
+export function patchWindows1252(arg: string) {
+  return arg.replaceAll(/[\x80-\x9f]/g, (match: string) => {
+    const code = match.charCodeAt(0);
+    const r = windows1252x80.charAt(code - 0x80);
+    return r === " " ? match : r;
+  });
+}
+
+export function decodeString(buffer: Buffer, encoding: string): string {
+  let s = buffer.toString(encoding);
+  if (encoding === "latin1") {
+    s = patchWindows1252(s);
+  }
+  return s;
 }
 
 class MultilineStream extends Transform {
@@ -105,8 +145,22 @@ class MultilineStream extends Transform {
     let buffer: string;
     let lines: string[];
     if (
-      ".\r\n" === (buffer = Buffer.concat(this.#chunks).toString()).slice(-3)
+      ".\r\n" ===
+        (buffer = Buffer.concat(this.#chunks).toString(defaultEncoding))
+          .slice(-3)
     ) {
+      const blank = buffer.indexOf("\r\n\r\n");
+      if (blank > 0) {
+        const match = /\nContent-Type:.*;\s*charset=([^\s;]+)/i.exec(
+          buffer.slice(0, blank),
+        );
+        if (match) {
+          const encoding = charset2encoding(match[1]);
+          if (encoding !== defaultEncoding) {
+            buffer = Buffer.concat(this.#chunks).toString(encoding);
+          }
+        }
+      }
       lines = buffer.slice(0, -3).trim().split("\r\n");
 
       for (const line of lines) {
@@ -135,7 +189,7 @@ class CompressedStream extends Transform {
       let crlf: number;
       if (-1 !== (crlf = buffer.indexOf("\r\n"))) {
         crlf += 2;
-        this.#response = buffer.slice(0, crlf).toString();
+        this.#response = buffer.slice(0, crlf).toString(defaultEncoding);
         this.#chunks = [
           buffer.slice(crlf),
         ];
@@ -152,7 +206,10 @@ class CompressedStream extends Transform {
       Buffer.concat(this.#chunks),
       (_error: Error, result?: Buffer) => {
         // only care about the end, so slice before converting to string
-        if (undefined !== result && ".\r\n" === result.slice(-3).toString()) {
+        if (
+          undefined !== result &&
+          ".\r\n" === result.slice(-3).toString(defaultEncoding)
+        ) {
           this.push(result);
           this.push(null);
         }
@@ -313,8 +370,9 @@ export default class NNTP {
       if (line.trim().length === 0 && inBody === false) {
         inBody = true;
       } else {
+        const first = line[0];
         if (inBody) {
-          if (line[0] === ".") {
+          if (first === ".") {
             if (line.length === 1) {
               line = "";
             } else if (line[1] === ".") {
@@ -323,7 +381,7 @@ export default class NNTP {
           }
           body.push(line);
         } else {
-          if (line[0] === " " && headers.length) {
+          if ((first === " " || first === "\t") && headers.length) {
             headers[headers.length - 1] += line;
           } else {
             headers.push(line);
@@ -474,7 +532,7 @@ export default class NNTP {
 
   #parseOverview(overview: string[], format: OverviewFieldIsFullDict) {
     return overview.map((line) => {
-      const messageParts = line.toString().split("\t");
+      const messageParts = line.split("\t");
       const message: MessageOverviewRaw = {};
 
       for (const [field, full] of Object.entries(format)) {

@@ -1,8 +1,10 @@
 // Copyright 2022 yakc. All rights reserved. MIT license.
 
-import NNTP from "./nntp.ts";
+import { decodeString, default as NNTP } from "./nntp.ts";
 import { parse } from "https://deno.land/std@0.148.0/flags/mod.ts";
+import { Buffer } from "https://deno.land/std@0.148.0/node/_buffer.mjs";
 import {
+  assertEquals,
   assertExists,
   assertRejects,
 } from "https://deno.land/std@0.148.0/testing/asserts.ts";
@@ -28,10 +30,22 @@ Deno.test("gets article and overviews", async () => {
   console.log("groups", await nntp.listActiveGroups());
   const numbers = await nntp.group(args.group);
   console.log("group", numbers);
-  console.log("article", await nntp.article(String(numbers.high)));
+  if (args.article) {
+    console.log("article", await nntp.article(args.article));
+  } else {
+    console.log("article", await nntp.article(String(numbers.high)));
+  }
   console.log(
     "overview",
     await nntp.xover(`${numbers.high - 5}-`, await nntp.overviewFormat()),
   );
   return nntp.disconnect();
+});
+
+Deno.test("patches Windows-1252", () => {
+  const want = "•bullet";
+  const buf = Buffer.from("-bullet");
+  buf.writeUInt8(0x95);
+  const got = decodeString(buf, "latin1");
+  assertEquals(got, want);
 });
