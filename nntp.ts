@@ -1,4 +1,4 @@
-// Copyright 2022 yakc. All rights reserved. MIT license.
+// Copyright 2022-2025 yakc. All rights reserved. MIT license.
 
 // Ported from https://github.com/robinvdvleuten/node-nntp
 // Original MIT license:
@@ -24,7 +24,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-import { Buffer } from "https://deno.land/std@0.148.0/node/buffer.ts";
+import { Buffer, TranscodeEncoding } from "node:buffer";
 import { connect, Socket } from "https://deno.land/std@0.148.0/node/net.ts";
 import { Transform } from "https://deno.land/std@0.148.0/node/stream.ts";
 import zlib from "https://deno.land/std@0.148.0/node/zlib.ts";
@@ -44,8 +44,23 @@ export class Response {
   static readonly NO_SUCH_GROUP = 411;
   static readonly NO_SUCH_ARTICLE = 430;
   static readonly ARTICLE_RETRIEVED = 220;
+  static readonly OVERVIEW_FOLLOWS = 224;
+  static readonly SYNTAX_ERROR = 501;
   // RFC 4643 (Oct 2006)
   static readonly PASSWORD_REQUIRED = 381;
+
+  static isMultiLine(firstThreeChars: string): boolean {
+    switch (parseInt(firstThreeChars)) {
+      // case this.GROUP_SELECTED:  // no, only with LISTGROUP, which we don't use
+      case this.MULTILINE_FOLLOWS:
+      case this.ARTICLE_RETRIEVED:
+      case this.OVERVIEW_FOLLOWS:
+        return true;
+      case this.SYNTAX_ERROR:
+      default:
+        return false;
+    }
+  }
 
   static createFromString(arg: string) {
     const matches = /^(\d{3}) ([\S\s]+)$/g.exec(arg.trim());
@@ -69,7 +84,7 @@ class ResponseStream extends Transform {
 
   #response?: Response;
 
-  _transform(chunk: Chunk, _encoding: string, done: () => void) {
+  override _transform(chunk: Chunk, _encoding: string, done: () => void) {
     if (undefined === this.#response) {
       this.#response = Response.createFromString(
         chunk.toString(defaultEncoding),
@@ -86,7 +101,7 @@ class ResponseStream extends Transform {
     done();
   }
 
-  _flush(done: () => void) {
+  override _flush(done: () => void) {
     this.push(this.#response);
     done();
   }
@@ -94,7 +109,12 @@ class ResponseStream extends Transform {
 
 const defaultEncoding = "latin1"; // aka 'binary'
 
-function charset2encoding(charset: string): string {
+// This originally returned `string`, but should actually be
+// BufferEncoding for the functions that use it. However, that
+// is or was defined globally in Node, with no clean way to
+// import it? TranscodeEncoding is exported in the usual way,
+// and only lacks 'hex', which is not applicable.
+function charset2encoding(charset: string): TranscodeEncoding {
   switch (charset.toLowerCase()) {
     case "utf-8":
     case "utf8":
@@ -122,7 +142,7 @@ export function patchWindows1252(arg: string) {
   });
 }
 
-export function decodeString(buffer: Buffer, encoding: string): string {
+export function decodeString(buffer: Buffer, encoding: TranscodeEncoding): string {
   let s = buffer.toString(encoding);
   if (encoding === "latin1") {
     s = patchWindows1252(s);
@@ -137,18 +157,18 @@ class MultilineStream extends Transform {
 
   #chunks: Buffer[] = [];
 
-  _transform(chunk: Chunk, _encoding: string, done: () => void) {
+  override _transform(chunk: Chunk, _encoding: string, done: () => void) {
+    const firstChunk = !this.#chunks.length;
     this.#chunks.push(
       chunk instanceof Buffer ? chunk : Buffer.from(chunk),
     );
 
-    let buffer: string;
+    let buffer = Buffer.concat(this.#chunks).toString(defaultEncoding);
     let lines: string[];
-    if (
-      ".\r\n" ===
-        (buffer = Buffer.concat(this.#chunks).toString(defaultEncoding))
-          .slice(-3)
-    ) {
+    if (firstChunk && !Response.isMultiLine(buffer)) {  // syntax error, like with invalid Article ID
+      this.push(buffer);
+      this.push(null);
+    } else if (".\r\n" === buffer.slice(-3)) {
       const blank = buffer.indexOf("\r\n\r\n");
       if (blank > 0) {
         const match = /\nContent-Type:.*;\s*charset=([^\s;]+)/i.exec(
@@ -178,7 +198,7 @@ class CompressedStream extends Transform {
   #chunks: Buffer[] = [];
   #response?: string;
 
-  _transform(chunk: Chunk, _encoding: string, done: () => void) {
+  override _transform(chunk: Chunk, _encoding: string, done: () => void) {
     this.#chunks.push(
       chunk instanceof Buffer ? chunk : Buffer.from(chunk),
     );
@@ -201,7 +221,7 @@ class CompressedStream extends Transform {
     done();
   }
 
-  _flush(done: () => void) {
+  override _flush(done: () => void) {
     zlib.inflate(
       Buffer.concat(this.#chunks),
       (_error: Error, result?: Buffer) => {
@@ -355,6 +375,10 @@ export default class NNTP {
 
     if (Response.NO_SUCH_ARTICLE === response.status) {
       throw new Error(`No such article`);
+    }
+
+    if (Response.SYNTAX_ERROR === response.status) {
+      throw new Error(`Invalid syntax for article ID`);
     }
 
     if (Response.ARTICLE_RETRIEVED !== response.status) {

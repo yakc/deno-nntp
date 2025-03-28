@@ -2,7 +2,7 @@
 
 import { decodeString, default as NNTP } from "./nntp.ts";
 import { parse } from "https://deno.land/std@0.148.0/flags/mod.ts";
-import { Buffer } from "https://deno.land/std@0.148.0/node/_buffer.mjs";
+import { Buffer } from "node:buffer";
 import {
   assertEquals,
   assertExists,
