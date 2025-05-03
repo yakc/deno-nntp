@@ -157,6 +157,23 @@ class MultilineStream extends Transform {
 
   #chunks: Buffer[] = [];
 
+  static reencode(part: string): string {
+    const blank = part.indexOf("\r\n\r\n");
+    if (blank > 0) {
+      const headers = part.slice(0, blank);
+      const match = /\nContent-Type:.*;\s*charset=([^\s;]+)/i.exec(
+        headers,
+      );
+      if (match) {
+        const encoding = charset2encoding(match[1]);
+        if (encoding !== defaultEncoding) {
+          part = Buffer.from(part, defaultEncoding).toString(encoding);
+        }
+      }
+    }
+    return part;
+  }
+
   override _transform(chunk: Chunk, _encoding: string, done: () => void) {
     const firstChunk = !this.#chunks.length;
     this.#chunks.push(
@@ -171,14 +188,17 @@ class MultilineStream extends Transform {
     } else if (".\r\n" === buffer.slice(-3)) {
       const blank = buffer.indexOf("\r\n\r\n");
       if (blank > 0) {
-        const match = /\nContent-Type:.*;\s*charset=([^\s;]+)/i.exec(
-          buffer.slice(0, blank),
+        const headers = buffer.slice(0, blank);
+        const match = /\nContent-Type:\s*multipart.*;\s*boundary="?([^\s";]+)/i.exec(
+          headers,
         );
         if (match) {
-          const encoding = charset2encoding(match[1]);
-          if (encoding !== defaultEncoding) {
-            buffer = Buffer.concat(this.#chunks).toString(encoding);
-          }
+          const boundary = "--" + match[1];
+          let parts = buffer.split(boundary)
+          parts = parts.map(MultilineStream.reencode);
+          buffer = parts.join(boundary);
+        } else {
+          buffer = MultilineStream.reencode(buffer);
         }
       }
       lines = buffer.slice(0, -3).trim().split("\r\n");
