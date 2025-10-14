@@ -30,6 +30,11 @@ import { Transform } from "https://deno.land/std@0.148.0/node/stream.ts";
 import zlib from "https://deno.land/std@0.148.0/node/zlib.ts";
 
 type Chunk = Buffer | string;
+type Request = Iterable<string>;
+
+function commandRequest(command: string): Request {
+  return [command + "\r\n"];
+}
 
 export class Response {
   lines: string[] = [];
@@ -41,6 +46,10 @@ export class Response {
   static readonly POSTING_PROHIBITED = 201;
   static readonly GROUP_SELECTED = 211;
   static readonly MULTILINE_FOLLOWS = 215;
+  static readonly ARTICLE_RECEIVED_OK = 240;
+  static readonly SEND_ARTICLE = 340;
+  static readonly POSTING_NOT_PERMITTED = 440;
+  static readonly POSTING_FAILED = 441;
   static readonly NO_SUCH_GROUP = 411;
   static readonly NO_SUCH_ARTICLE = 430;
   static readonly ARTICLE_RETRIEVED = 220;
@@ -325,7 +334,7 @@ export default class NNTP {
     // TODO Deno does not have `node:tls` module for `secure` option
     this.#socket = connect(this.options.port as number, this.options.host);
 
-    const response = await this.#getResponse(false, false);
+    const response = await this.#getResponse(false, false, []);
     this.isConnected = true;
     switch (response.status) {
       case Response.POSTING_PROHIBITED:
@@ -378,19 +387,17 @@ export default class NNTP {
   }
 
   authInfo(type: string, value: string) {
-    return this.#getResponse(false, false, `AUTHINFO ${type} ${value}"`);
+    return this.#getResponse(false, false, commandRequest(`AUTHINFO ${type} ${value}`));
   }
 
   /** messageId can also be message number in current group */
   async article(messageId: string): Promise<MessageLines> {
-    if (!this.#socket) {
-      throw new Error(`not connected`);
-    }
+    this.#throwIfNotConnected();
 
     const response = await this.#getResponse(
       true,
       false,
-      `ARTICLE ${messageId}`,
+      commandRequest(`ARTICLE ${messageId}`),
     );
 
     if (Response.NO_SUCH_ARTICLE === response.status) {
@@ -437,11 +444,64 @@ export default class NNTP {
     return { headers, body };
   }
 
+  async post(msg: MessageLines): Promise<boolean> {
+    if (this.isReadOnly) {
+      throw new Error(`Posting not permitted`);
+    }
+    this.#throwIfNotConnected();
+
+    let response = await this.#getResponse(
+      false,
+      false,
+      commandRequest("POST"),
+    );
+
+    if (Response.POSTING_NOT_PERMITTED === response.status) {
+      throw new Error(`Posting not permitted`);
+    }
+
+    if (Response.SEND_ARTICLE !== response.status) {
+      throw new Error(
+        `Unexpected response received: ${JSON.stringify(response)}`,
+      );
+    }
+
+    response = await this.#getResponse(
+      false,
+      false,
+      (function* () {
+        for (const line of msg.headers) {
+          yield line + "\r\n";
+        }
+        yield "\r\n";
+        for (const line of msg.body) {
+          if (line.startsWith(".")) {
+            yield "." + line + "\r\n";
+          } else {
+            yield line + "\r\n";
+          }
+        }
+        yield ".\r\n";
+      })(),
+    );
+
+    switch (response.status) {
+      case Response.ARTICLE_RECEIVED_OK:
+        return true;
+      case Response.POSTING_FAILED:
+        return false;
+      default:
+        throw new Error(
+          `Unexpected response received: ${JSON.stringify(response)}`,
+        );
+    }
+  }
+
   async listActiveGroups(): Promise<ActiveGroupDict> {
     const response = await this.#getResponse(
       true,
       false,
-      "LIST ACTIVE",
+      commandRequest("LIST ACTIVE"),
     );
     if (Response.MULTILINE_FOLLOWS !== response.status) {
       throw new Error(
@@ -470,7 +530,7 @@ export default class NNTP {
     const response = await this.#getResponse(
       false,
       false,
-      `GROUP ${group}`,
+      commandRequest(`GROUP ${group}`),
     );
 
     if (Response.NO_SUCH_GROUP === response.status) {
@@ -494,7 +554,7 @@ export default class NNTP {
   }
 
   async overviewFormat() {
-    const response = await this.#getResponse(true, false, "LIST OVERVIEW.FMT");
+    const response = await this.#getResponse(true, false, commandRequest("LIST OVERVIEW.FMT"));
 
     const format: OverviewFieldIsFullDict = {};
     response.lines.forEach((line: string) => {
@@ -512,7 +572,7 @@ export default class NNTP {
   async xover(range: string, format: OverviewFieldIsFullDict) {
     format = Object.assign({ number: false }, format);
 
-    const response = await this.#getResponse(true, false, `XOVER ${range}`);
+    const response = await this.#getResponse(true, false, commandRequest(`XOVER ${range}`));
     return this.#parseOverview(response.lines, format);
   }
 
@@ -520,14 +580,14 @@ export default class NNTP {
   async xzver(range: string, format: OverviewFieldIsFullDict) {
     format = Object.assign({ number: false }, format);
 
-    const response = await this.#getResponse(true, true, `XZVER ${range}`);
+    const response = await this.#getResponse(true, true, commandRequest(`XZVER ${range}`));
     return this.#parseOverview(response.lines, format);
   }
 
   #getResponse(
     multiline: boolean,
     compressed: boolean,
-    command?: string,
+    request: Request,
   ): Promise<Response> {
     const socket = this.#throwIfNotConnected();
 
@@ -562,8 +622,8 @@ export default class NNTP {
         resolve(response);
       });
 
-      if (command) {
-        socket.write(command + "\r\n");
+      for (const line of request) {
+        socket.write(line);
       }
     })
       .finally(() => {
