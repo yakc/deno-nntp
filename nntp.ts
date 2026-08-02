@@ -169,8 +169,9 @@ class MultilineStream extends Transform {
   static reencode(part: string): string {
     const blank = part.indexOf("\r\n\r\n");
     if (blank > 0) {
-      const headers = part.slice(0, blank);
-      const match = /\nContent-Type:.*;\s*charset=([^\s;]+)/i.exec(
+      const headers = part.slice(0, blank)
+                          .replace(/\r\n\s+/g, "\t");  // and unfold
+      const match = /\nContent-Type:.*;\s*charset="?([^"\s;]+)/i.exec(
         headers,
       );
       if (match) {
