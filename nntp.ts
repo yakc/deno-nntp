@@ -1,4 +1,4 @@
-// Copyright 2022-2025 yakc. All rights reserved. MIT license.
+// Copyright 2022-2026 yakc. All rights reserved. MIT license.
 
 // Ported from https://github.com/robinvdvleuten/node-nntp
 // Original MIT license:
@@ -29,6 +29,8 @@ import { connect, Socket } from "https://deno.land/std@0.148.0/node/net.ts";
 import { Transform } from "https://deno.land/std@0.148.0/node/stream.ts";
 import zlib from "https://deno.land/std@0.148.0/node/zlib.ts";
 
+export * from "./mime.ts";
+
 type Chunk = Buffer | string;
 type Request = Iterable<string>;
 
@@ -39,7 +41,7 @@ function commandRequest(command: string): Request {
 export class Response {
   lines: string[] = [];
 
-  constructor(public status: number, public message: string) {}
+  constructor(public status: number, public message: string) { }
 
   // RFC 3977 (Oct 2006) supersedes RFC 997 (Feb 1986)
   static readonly POSTING_ALLOWED = 200;
@@ -170,7 +172,7 @@ class MultilineStream extends Transform {
     const blank = part.indexOf("\r\n\r\n");
     if (blank > 0) {
       const headers = part.slice(0, blank)
-                          .replace(/\r\n\s+/g, "\t");  // and unfold
+        .replace(/\r\n\s+/g, "\t");  // and unfold
       const match = /\nContent-Type:.*;\s*charset="?([^"\s;]+)/i.exec(
         headers,
       );
@@ -340,7 +342,7 @@ export default class NNTP {
     switch (response.status) {
       case Response.POSTING_PROHIBITED:
         this.isReadOnly = true;
-        // fallthrough
+      // fallthrough
       case Response.POSTING_ALLOWED:
         return response;
     }

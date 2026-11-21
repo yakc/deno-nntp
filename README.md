@@ -9,11 +9,41 @@ port 119.
 
 ## Testing
 
-The tests require a news server and group name to test against.
+The MIME builder tests need no server:
 
 ```bash
-deno test --allow-env --allow-net -- --host news.example.com --group alt.something.or.other
+deno test mime.test.ts
 ```
+
+The protocol tests require a news server and group name to test against.
+
+```bash
+deno test --allow-env --allow-net nntp.test.ts -- --host news.example.com --group alt.something.or.other
+```
+
+## Posting with attachments
+
+`buildMimeMessage` (in `mime.ts`, re-exported from `nntp.ts`) produces the
+`MessageLines` for `post()`. Attachments are sent as MIME `multipart/mixed`
+with base64 encoding.
+
+```ts
+import NNTP, { buildMimeMessage } from "./nntp.ts";
+
+const msg = buildMimeMessage({
+  headers: ["From: Me <me@example.com>", "Newsgroups: alt.test", "Subject: pic"],
+  text: "See attached.\n",
+  attachments: [{
+    filename: "cat.png",
+    contentType: "image/png",
+    data: await Deno.readFile("cat.png"),
+  }],
+});
+await nntp.post(msg);
+```
+
+Many text-only servers and groups reject binary attachments regardless of
+encoding, in which case `post()` returns `false`.
 
 ## Rationale and caveats
 
