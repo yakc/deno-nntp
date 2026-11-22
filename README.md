@@ -21,6 +21,8 @@ The protocol tests require a news server and group name to test against.
 deno test --allow-env --allow-net nntp.test.ts -- --host news.example.com --group alt.something.or.other
 ```
 
+Add `--secure` for NNTPS, and `--port` for a non-default port.
+
 ## Posting with attachments
 
 `buildMimeMessage` (in `mime.ts`, re-exported from `nntp.ts`) produces the
@@ -52,9 +54,10 @@ implement the deprecated `node:domain` package, which attempted to unify event
 handling from emitters. The usage here is fairly light, and is coverted to use
 promises, which is already part of the overall code modernization.
 
-Deno also does not (currently?) implement `node:tls`, so the library cannot use
-NNTPS, which is usually on port 563. This is controlled by the `secure` option
-when creating the `NNTP` object.
+NNTPS (implicit TLS, usually on port 563) is enabled with the `secure` option
+when creating the `NNTP` object; the port then defaults to 563. Extra
+`tls.connect()` options, such as `ca` for a private certificate authority, can
+be passed as `tls`. STARTTLS is not supported.
 
 The library attempts to support the non-standard `XZVER` command, which is a
 compressed variant of the more-standard `XOVER` extension. But `XZVER` and the

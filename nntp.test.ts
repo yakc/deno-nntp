@@ -9,13 +9,20 @@ import {
   assertRejects,
 } from "jsr:@std/assert@^1";
 
-const args = parseArgs(Deno.args);
+const args = parseArgs(Deno.args, {
+  boolean: ["secure"],
+  string: ["host", "group", "article", "port"],
+});
+const port = args.port ? Number(args.port) : undefined;
 assertExists(args.host);
 assertExists(args.group);
+const group = args.group; // narrowed for use inside test closures
 
 Deno.test("throws when not connected", () => {
   const nntp = new NNTP({
     host: args.host,
+    port,
+    secure: args.secure,
   });
 
   assertRejects(() => nntp.disconnect(), Error, "not connected");
@@ -24,11 +31,13 @@ Deno.test("throws when not connected", () => {
 Deno.test("gets article and overviews", async () => {
   const nntp = new NNTP({
     host: args.host,
+    port,
+    secure: args.secure,
   });
 
   console.log("connect", await nntp.connectAndAuthenticate());
   console.log("groups", await nntp.listActiveGroups());
-  const numbers = await nntp.group(args.group);
+  const numbers = await nntp.group(group);
   console.log("group", numbers);
   if (args.article) {
     console.log("article", await nntp.article(args.article));

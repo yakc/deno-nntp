@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 import { Buffer, TranscodeEncoding } from "node:buffer";
 import { connect, Socket } from "node:net";
+import { connect as tlsConnect, ConnectionOptions } from "node:tls";
 import { Transform } from "node:stream";
 import zlib from "node:zlib";
 
@@ -303,15 +304,18 @@ export interface MessageLines {
 
 export interface NNTPOptions {
   host?: string;
+  /** Defaults to 119, or 563 when `secure` */
   port?: number;
+  /** Use implicit TLS (NNTPS) */
   secure?: boolean;
+  /** Extra options for `tls.connect()` when `secure`, like `ca` or `rejectUnauthorized` */
+  tls?: ConnectionOptions;
   username?: string;
   password?: string;
 }
 
 const defaults: NNTPOptions = {
   host: "localhost",
-  port: 119,
   secure: false,
 };
 
@@ -322,6 +326,7 @@ export default class NNTP {
 
   constructor(options?: NNTPOptions) {
     this.options = Object.assign({}, defaults, options);
+    this.options.port ??= this.options.secure ? 563 : 119;
   }
 
   #socket?: Socket;
@@ -334,8 +339,10 @@ export default class NNTP {
   }
 
   async connect() {
-    // TODO Deno does not have `node:tls` module for `secure` option
-    this.#socket = connect(this.options.port as number, this.options.host);
+    const { host, port, secure } = this.options;
+    this.#socket = secure
+      ? tlsConnect({ servername: host, ...this.options.tls, host, port })
+      : connect(port as number, host);
 
     const response = await this.#getResponse(false, false, []);
     this.isConnected = true;
