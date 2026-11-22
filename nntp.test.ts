@@ -1,15 +1,15 @@
 // Copyright 2022 yakc. All rights reserved. MIT license.
 
 import { decodeString, default as NNTP } from "./nntp.ts";
-import { parse } from "https://deno.land/std@0.148.0/flags/mod.ts";
+import { parseArgs } from "jsr:@std/cli@^1/parse-args";
 import { Buffer } from "node:buffer";
 import {
   assertEquals,
   assertExists,
   assertRejects,
-} from "https://deno.land/std@0.148.0/testing/asserts.ts";
+} from "jsr:@std/assert@^1";
 
-const args = parse(Deno.args);
+const args = parseArgs(Deno.args);
 assertExists(args.host);
 assertExists(args.group);
 

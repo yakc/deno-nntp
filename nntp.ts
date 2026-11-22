@@ -25,9 +25,9 @@ THE SOFTWARE.
 */
 
 import { Buffer, TranscodeEncoding } from "node:buffer";
-import { connect, Socket } from "https://deno.land/std@0.148.0/node/net.ts";
-import { Transform } from "https://deno.land/std@0.148.0/node/stream.ts";
-import zlib from "https://deno.land/std@0.148.0/node/zlib.ts";
+import { connect, Socket } from "node:net";
+import { Transform } from "node:stream";
+import zlib from "node:zlib";
 
 export * from "./mime.ts";
 
@@ -256,7 +256,7 @@ class CompressedStream extends Transform {
   override _flush(done: () => void) {
     zlib.inflate(
       Buffer.concat(this.#chunks),
-      (_error: Error, result?: Buffer) => {
+      (_error: Error | null, result?: Buffer) => {
         // only care about the end, so slice before converting to string
         if (
           undefined !== result &&
@@ -367,6 +367,8 @@ export default class NNTP {
         resolve();
       });
 
+      // Paused after #getResponse unpipes; a paused stream never emits "end"
+      socket.resume();
       socket.end();
     });
   }

@@ -8,7 +8,7 @@ import {
   assert,
   assertEquals,
   assertMatch,
-} from "https://deno.land/std@0.148.0/testing/asserts.ts";
+} from "jsr:@std/assert@^1";
 
 const baseHeaders = [
   "From: Tester <test@example.com>",
